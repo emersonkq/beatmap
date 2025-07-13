@@ -1,0 +1,82 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: sans-serif;
+  background: white;
+}
+
+#controls {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: #f7f7f7;
+  border-bottom: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  padding: 5px 10px;
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+#youtubeUrl {
+  width: 300px;
+  max-width: 60vw;
+  padding: 8px;
+  font-size: 1rem;
+}
+
+#generateBtn,
+#stopBtn {
+  padding: 8px 15px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#generateBtn {
+  background-color: #007bff;
+  color: white;
+}
+
+#stopBtn {
+  background-color: #dc3545;
+  color: white;
+  display: none;
+}
+
+#audio {
+  width: 200px;
+}
+
+#delayControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  font-size: 0.9rem;
+  display: none;
+  white-space: nowrap;
+}
+
+#delaySlider {
+  width: 150px;
+}
+
+#gameCanvas {
+  position: fixed;
+  top: 60px;
+  left: 0;
+  width: 100vw;
+  height: calc(100vh - 60px);
+  background: white;
+  display: none;
+  touch-action: none;
+}

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/x-icon" href="icon.png">
+  <title>Beatmap Generator</title>
+</head>
+<body>
+
+  <div id="controls">
+    <input type="text" id="youtubeUrl" placeholder="Paste YouTube URL here" />
+    <button id="generateBtn">Generate Beatmap</button>
+    <button id="stopBtn">Stop</button>
+
+    <div id="delayControl" title="Adjust how early tiles start falling">
+      <label for="delaySlider">Tile Fall Delay (seconds):</label>
+      <input type="range" id="delaySlider" min="0" max="2" step="0.05" value="0.00" />
+      <span id="delayValue">0.00</span>
+    </div>
+
+    <audio id="audio" controls></audio>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const audio = document.getElementById("audio");
+    const generateBtn = document.getElementById("generateBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const youtubeUrlInput = document.getElementById("youtubeUrl");
+    const delaySlider = document.getElementById("delaySlider");
+    const delayValue = document.getElementById("delayValue");
+    const delayControl = document.getElementById("delayControl");
+
+    let beatmap = null;
+    let animationId = null;
+    let startTime = null;
+    let isPlaying = false;
+
+    const NUM_LANES = 3;
+    let TILE_HEIGHT = 210; 
+    let TAP_LINE_Y = 0;
+    let LANE_WIDTH = 0;
+    const dpr = window.devicePixelRatio || 1;
+
+    let delaySeconds = parseFloat(delaySlider.value);
+
+    function resizeCanvas() {
+      const width = window.innerWidth;
+      const height = window.innerHeight - 60;
+
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+
+      LANE_WIDTH = width / NUM_LANES;
+      TAP_LINE_Y = height - 20;
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    delaySlider.addEventListener("input", () => {
+      delaySeconds = parseFloat(delaySlider.value);
+      delayValue.textContent = delaySeconds.toFixed(2);
+    });
+
+    generateBtn.addEventListener("click", async () => {
+      const url = youtubeUrlInput.value.trim();
+      if (!url) {
+        alert("Please paste a valid YouTube URL");
+        return;
+      }
+
+      generateBtn.disabled = true;
+      generateBtn.textContent = "Generating...";
+
+      try {
+        const response = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ youtube_url: url }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          alert("Error: " + (err.error || "Failed to generate beatmap"));
+          return;
+        }
+
+        beatmap = await response.json();
+        beatmap.tiles.forEach(tile => {
+          tile.active = true;
+          tile.fadeProgress = 0;
+          tile._x = 0;
+          tile._y = 0;
+        });
+
+        audio.src = "/audio";
+        audio.load();
+
+        stopBtn.style.display = "inline-block";
+        delayControl.style.display = "flex";
+        youtubeUrlInput.style.display = "none";
+        generateBtn.style.display = "none";
+
+        audio.style.display = "inline-block";
+
+        canvas.style.display = "block";
+
+        isPlaying = false;
+        startTime = null;
+
+        if (animationId) {
+          cancelAnimationFrame(animationId);
+          animationId = null;
+        }
+
+        try {
+          await audio.play();
+          audio.style.display = "none";
+        } catch {
+          alert("Please press play manually on the audio player.");
+          audio.style.display = "inline-block";
+        }
+
+      } catch (e) {
+        alert("Error: " + e.message);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = "Generate Beatmap";
+      }
+    });
+
+    audio.addEventListener("play", () => {
+      if (!isPlaying) {
+        isPlaying = true;
+        startTime = null;
+        animationId = requestAnimationFrame(gameLoop);
+        audio.style.display = "none";
+      }
+    });
+
+    audio.addEventListener("pause", stopAnimation);
+    audio.addEventListener("ended", stopAnimation);
+
+    function stopAnimation() {
+      if (isPlaying) {
+        isPlaying = false;
+        if (animationId) {
+          cancelAnimationFrame(animationId);
+          animationId = null;
+        }
+      }
+    }
+
+    stopBtn.addEventListener("click", () => {
+      audio.pause();
+      audio.currentTime = 0;
+
+      stopAnimation();
+
+      canvas.style.display = "none";
+      stopBtn.style.display = "none";
+      delayControl.style.display = "none";
+      youtubeUrlInput.style.display = "inline-block";
+      generateBtn.style.display = "inline-block";
+
+      audio.style.display = "inline-block";
+
+      beatmap = null;
+      startTime = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    function gameLoop(timestamp) {
+      if (!startTime) startTime = timestamp;
+      const elapsed = audio.currentTime;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw tap line
+      ctx.strokeStyle = "gray";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, TAP_LINE_Y);
+      ctx.lineTo(canvas.width / dpr, TAP_LINE_Y);
+      ctx.stroke();
+
+      if (beatmap) {
+        const bpm = beatmap.metadata.bpm;
+        const secondsPerBeat = 60 / bpm;
+
+        const extraFallDistance = 450;  // bigger fall distance so tiles start higher
+        const fallTimeMultiplier = 2.0; // slower fall speed
+        const fallDistance = TAP_LINE_Y + extraFallDistance;
+        const fallSpeed = fallDistance / (secondsPerBeat * fallTimeMultiplier);
+
+        for (const tile of beatmap.tiles) {
+          if (!tile.active && tile.fadeProgress >= 1) continue;
+
+          const timeUntilHit = tile.time - elapsed + delaySeconds;
+          const y = TAP_LINE_Y - TILE_HEIGHT - timeUntilHit * fallSpeed;
+
+          tile._x = tile.lane * LANE_WIDTH;
+          tile._y = y;
+
+          if (y > -TILE_HEIGHT && y < canvas.height / dpr) {
+            if (tile.active) {
+              ctx.fillStyle = "black";
+              ctx.fillRect(
+                tile._x + 2,
+                tile._y,
+                LANE_WIDTH - 4,
+                TILE_HEIGHT
+              );
+            } else {
+              tile.fadeProgress += 0.05;
+              const fade = Math.min(tile.fadeProgress, 1);
+              ctx.fillStyle = `rgba(0, 255, 0, ${1 - fade})`;
+              ctx.fillRect(
+                tile._x + 2,
+                tile._y,
+                LANE_WIDTH - 4,
+                TILE_HEIGHT
+              );
+            }
+          }
+        }
+      }
+
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    function handleInput(x, y) {
+      if (!beatmap) return;
+
+      for (const tile of beatmap.tiles) {
+        if (!tile.active) continue;
+
+        const tileX = tile._x + 2;
+        const tileY = tile._y;
+        const tileW = LANE_WIDTH - 4;
+        const tileH = TILE_HEIGHT;
+
+        if (
+          x >= tileX &&
+          x <= tileX + tileW &&
+          y >= tileY &&
+          y <= tileY + tileH
+        ) {
+          tile.active = false;
+          tile.fadeProgress = 0;
+        }
+      }
+    }
+
+    canvas.addEventListener("mousedown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      handleInput(e.clientX - rect.left, e.clientY - rect.top);
+    });
+
+    canvas.addEventListener("touchstart", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      for (const touch of e.touches) {
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        handleInput(x, y);
+      }
+    });
+  </script>
+
+</body>
+</html>
